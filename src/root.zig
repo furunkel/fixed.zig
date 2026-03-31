@@ -25,6 +25,9 @@ pub fn Q(comptime int_bits_: comptime_int, comptime frac_bits_: comptime_int) ty
         pub const resolution: f64 = std.math.ldexp(@as(f64, 1.0), -frac_bits);
         pub const bits = int_bits + frac_bits + 1;
         pub const StorageInt = std.meta.Int(.signed, bits);
+        pub const max_numerator = std.math.maxInt(StorageInt);
+        pub const min_numerator = std.math.minInt(StorageInt);
+
         pub const IntInt = std.meta.Int(.signed, int_bits + 1);
         const overflow_bits = bits + frac_bits;
         pub const OverflowInt = std.meta.Int(.signed, overflow_bits);
@@ -37,12 +40,19 @@ pub fn Q(comptime int_bits_: comptime_int, comptime frac_bits_: comptime_int) ty
             return .{ .numerator = raw };
         }
 
-        pub fn fromFloat(comptime T: type, x: T) Self {
-            const scaled = std.math.ldexp(x, frac_bits);
-            const rounded = if (scaled > 0.0) scaled + 0.5 else if (scaled <= 0.0) scaled - 0.5 else scaled;
+        pub fn fromFloat(x: anytype) Self {
+            const T = @TypeOf(x);
+            const type_info = @typeInfo(T);
+            switch (type_info) {
+                .float, .comptime_float => {
+                    const scaled = if (type_info == .float) std.math.ldexp(x, frac_bits) else x * @exp2(@as(comptime_float, @floatFromInt(frac_bits)));
+                    const rounded = if (scaled > 0.0) scaled + 0.5 else if (scaled <= 0.0) scaled - 0.5 else scaled;
 
-            // @intFromFloat "rounds" towards zero
-            return .{ .numerator = @intFromFloat(rounded) };
+                    // @intFromFloat "rounds" towards zero
+                    return .{ .numerator = @intFromFloat(rounded) };
+                },
+                else => @compileError(std.fmt.comptimePrint("expected float type, got {s}", .{@typeName(T)})),
+            }
         }
 
         pub fn fromInt(x: IntInt) Self {
@@ -445,134 +455,75 @@ test "toInt (rounding)" {
 
 test "fromFloat" {
     const Q8_7 = Q(8, 7);
+    const Types = [_]type{ f32, f64, f128, comptime_float };
 
-    {
-        const a = Q8_7.fromFloat(f32, 1.5);
+    inline for (Types) |T| {
+        const a = Q8_7.fromFloat(@as(T, 1.5));
         try testing.expectEqual(192, a.numerator);
 
-        const b = Q8_7.fromFloat(f32, -2.25);
+        const b = Q8_7.fromFloat(@as(T, -2.25));
         try testing.expectEqual(-288, b.numerator);
 
-        const c = Q8_7.fromFloat(f32, 0.0);
+        const c = Q8_7.fromFloat(@as(T, 0.0));
         try testing.expectEqual(0, c.numerator);
 
-        const d = Q8_7.fromFloat(f32, -256.0);
+        const d = Q8_7.fromFloat(@as(T, -256.0));
         try testing.expectEqual(-32768, d.numerator);
 
-        const e = Q8_7.fromFloat(f32, 255.9921875);
-        try testing.expectEqual(32767, e.numerator);
-    }
-
-    {
-        const a = Q8_7.fromFloat(f64, 1.5);
-        try testing.expectEqual(192, a.numerator);
-
-        const b = Q8_7.fromFloat(f64, -2.25);
-        try testing.expectEqual(-288, b.numerator);
-
-        const c = Q8_7.fromFloat(f64, 0.0);
-        try testing.expectEqual(0, c.numerator);
-
-        const d = Q8_7.fromFloat(f64, -256.0);
-        try testing.expectEqual(-32768, d.numerator);
-
-        const e = Q8_7.fromFloat(f64, 255.9921875);
+        const e = Q8_7.fromFloat(@as(T, 255.9921875));
         try testing.expectEqual(32767, e.numerator);
     }
 }
 
 test "fromFloat (zero integer bits)" {
     const Q0_7 = Q(0, 7);
+    const Types = [_]type{ f32, f64, f128, comptime_float };
 
-    {
-        const a = Q0_7.fromFloat(f32, 0.0);
+    inline for (Types) |T| {
+        const a = Q0_7.fromFloat(@as(T, 0.0));
         try testing.expectEqual(0, a.numerator);
 
-        const b = Q0_7.fromFloat(f32, -1.0);
+        const b = Q0_7.fromFloat(@as(T, -1.0));
         try testing.expectEqual(-128, b.numerator);
 
-        const c = Q0_7.fromFloat(f32, 0.9921875);
+        const c = Q0_7.fromFloat(@as(T, 0.9921875));
         try testing.expectEqual(127, c.numerator);
 
-        const d = Q0_7.fromFloat(f32, 0.5);
+        const d = Q0_7.fromFloat(@as(T, 0.5));
         try testing.expectEqual(64, d.numerator);
 
-        const e = Q0_7.fromFloat(f32, -0.5);
-        try testing.expectEqual(-64, e.numerator);
-    }
-
-    {
-        const a = Q0_7.fromFloat(f64, 0.0);
-        try testing.expectEqual(0, a.numerator);
-
-        const b = Q0_7.fromFloat(f64, -1.0);
-        try testing.expectEqual(-128, b.numerator);
-
-        const c = Q0_7.fromFloat(f64, 0.9921875);
-        try testing.expectEqual(127, c.numerator);
-
-        const d = Q0_7.fromFloat(f64, 0.5);
-        try testing.expectEqual(64, d.numerator);
-
-        const e = Q0_7.fromFloat(f64, -0.5);
+        const e = Q0_7.fromFloat(@as(T, -0.5));
         try testing.expectEqual(-64, e.numerator);
     }
 }
 
 test "fromFloat (rounding)" {
-    {
+    const Types = [_]type{ f32, f64, f128, comptime_float };
+    inline for (Types) |T| {
         const Q8_7 = Q(8, 7);
 
         // rounding at midpoint (half away from zero) 5.0 * (res / 2.0) = 5.0/2 * res should round to 3 * res = raw(3)
-        const a = Q8_7.fromFloat(f32, 0.01953125);
+        const a = Q8_7.fromFloat(@as(T, 0.01953125));
         try testing.expectEqual(3, a.numerator);
 
         // rounding at midpoint (same but negative)
-        const b = Q8_7.fromFloat(f32, -0.01953125);
+        const b = Q8_7.fromFloat(@as(T, -0.01953125));
         try testing.expectEqual(-3, b.numerator);
 
         // rounding above midpoint (half away from zero) 5.0 * (res / 3.0) = 5.0/3 * res should round to 2 * res = raw(2)
-        const c = Q8_7.fromFloat(f32, 0.013020833333333334);
+        const c = Q8_7.fromFloat(@as(T, 0.013020833333333334));
         try testing.expectEqual(2, c.numerator);
 
         // rounding above midpoint (same but negative)
-        const d = Q8_7.fromFloat(f32, -0.013020833333333334);
+        const d = Q8_7.fromFloat(@as(T, -0.013020833333333334));
         try testing.expectEqual(-2, d.numerator);
 
         // rounding below midpoint (half away from zero) 5.0 * (res / 4.0) = 5.0/4 * res should round to 1 * res = raw(1)
-        const e = Q8_7.fromFloat(f32, 0.009765625);
+        const e = Q8_7.fromFloat(@as(T, 0.009765625));
         try testing.expectEqual(1, e.numerator);
 
         // rounding above midpoint (same but negative)
-        const f = Q8_7.fromFloat(f32, -0.009765625);
-        try testing.expectEqual(-1, f.numerator);
-    }
-
-    {
-        const Q8_7 = Q(8, 7);
-
-        // rounding at midpoint (half away from zero) 5.0 * (res / 2.0) = 5.0/2 * res should round to 3 * res = raw(3)
-        const a = Q8_7.fromFloat(f64, 0.01953125);
-        try testing.expectEqual(3, a.numerator);
-
-        // rounding at midpoint (same but negative)
-        const b = Q8_7.fromFloat(f64, -0.01953125);
-        try testing.expectEqual(-3, b.numerator);
-
-        // rounding above midpoint (half away from zero) 5.0 * (res / 3.0) = 5.0/3 * res should round to 2 * res = raw(2)
-        const c = Q8_7.fromFloat(f64, 0.013020833333333334);
-        try testing.expectEqual(2, c.numerator);
-
-        // rounding above midpoint (same but negative)
-        const d = Q8_7.fromFloat(f64, -0.013020833333333334);
-        try testing.expectEqual(-2, d.numerator);
-
-        // rounding below midpoint (half away from zero) 5.0 * (res / 4.0) = 5.0/4 * res should round to 1 * res = raw(1)
-        const e = Q8_7.fromFloat(f64, 0.009765625);
-        try testing.expectEqual(1, e.numerator);
-
-        // rounding above midpoint (same but negative)
-        const f = Q8_7.fromFloat(f64, -0.009765625);
+        const f = Q8_7.fromFloat(@as(T, -0.009765625));
         try testing.expectEqual(-1, f.numerator);
     }
 }
@@ -583,42 +534,23 @@ fn expectApproxEqToFloat(T: type, expected: T, q: anytype) !void {
 }
 
 test "toFloat" {
-    {
-        const Q8_7 = Q(8, 7);
-
+    const Q8_7 = Q(8, 7);
+    const Types = [_]type{ f32, f64, f128 };
+    inline for (Types) |T| {
         const a = Q8_7.withNumerator(10);
-        try expectApproxEqToFloat(f32, 0.078125, a);
+        try expectApproxEqToFloat(T, 0.078125, a);
 
         const b = Q8_7.withNumerator(-10);
-        try expectApproxEqToFloat(f32, -0.078125, b);
+        try expectApproxEqToFloat(T, -0.078125, b);
 
         const c = Q8_7.withNumerator(0);
-        try expectApproxEqToFloat(f32, 0, c);
+        try expectApproxEqToFloat(T, 0, c);
 
         const d = Q8_7.withNumerator(std.math.minInt(i16));
-        try expectApproxEqToFloat(f32, -256.0, d);
+        try expectApproxEqToFloat(T, -256.0, d);
 
         const e = Q8_7.withNumerator(std.math.maxInt(i16));
-        try expectApproxEqToFloat(f32, 255.9921875, e);
-    }
-
-    {
-        const Q8_7 = Q(8, 7);
-
-        const a = Q8_7.withNumerator(10);
-        try expectApproxEqToFloat(f64, 0.078125, a);
-
-        const b = Q8_7.withNumerator(-10);
-        try expectApproxEqToFloat(f64, -0.078125, b);
-
-        const c = Q8_7.withNumerator(0);
-        try expectApproxEqToFloat(f64, 0, c);
-
-        const d = Q8_7.withNumerator(std.math.minInt(i16));
-        try expectApproxEqToFloat(f64, -256.0, d);
-
-        const e = Q8_7.withNumerator(std.math.maxInt(i16));
-        try expectApproxEqToFloat(f64, 255.9921875, e);
+        try expectApproxEqToFloat(T, 255.9921875, e);
     }
 }
 
@@ -831,38 +763,72 @@ test "multiplication (rounding)" {
 test "division" {
     const Q8_7 = Q(8, 7);
 
-    const a = Q8_7.fromFloat(f64, 6.0);
-    const b = Q8_7.fromFloat(f64, 2.0);
-    const c = a.div(b);
+    {
+        const a = Q8_7.withNumerator(768); // 6.0
+        const b = Q8_7.withNumerator(384); // 3.0
+        const c = a.div(b);
 
-    try testing.expectApproxEqAbs(3.0, c.toFloat(f64), 0.01);
+        try testing.expectEqual(256, c.numerator);
+    }
+
+    {
+        const a = Q8_7.withNumerator(0);
+        const b = Q8_7.withNumerator(256); // 2.0
+        const c = a.div(b);
+
+        try testing.expectEqual(0, c.numerator);
+    }
+
+    {
+        const a = Q8_7.withNumerator(128); // 1.0
+        const b = Q8_7.withNumerator(64); // 0.5
+        const c = a.div(b);
+
+        try testing.expectEqual(256, c.numerator);
+    }
+
+    {
+        const a = Q8_7.withNumerator(128); // 1.0
+        const b = Q8_7.withNumerator(-64); // -0.5
+        const c = a.div(b);
+
+        try testing.expectEqual(-256, c.numerator);
+    }
 }
 
-test "division large" {
-    const T = Q(100, 100);
+test "division (big)" {
+    const Q100_100 = Q(100, 100);
 
     {
-        const a = T.fromFloat(f64, 0.8697620772582899);
-        const b = T.fromFloat(f64, 0.8602583449105785);
+        const a = Q100_100.withNumerator(7605903601369376408980219232256); // 6.0
+        const b = Q100_100.withNumerator(3802951800684688204490109616128); // 3.0
         const c = a.div(b);
 
-        try testing.expectApproxEqAbs(1.011047532876533, c.toFloat(f64), 0.0000000000000001);
+        try testing.expectEqual(2535301200456458802993406410752, c.numerator);
     }
 
     {
-        const a = T.fromFloat(f64, 0.8697620772582899);
-        const b = T.fromFloat(f64, -0.8602583449105785);
+        const a = Q100_100.withNumerator(7605903601369376408980219232256); // 6.0
+        const b = Q100_100.withNumerator(2535301200456458802993406410752); // 2.0
         const c = a.div(b);
 
-        try testing.expectApproxEqAbs(-1.011047532876533, c.toFloat(f64), 0.0000000000000001);
+        try testing.expectEqual(3802951800684688204490109616128, c.numerator);
     }
 
     {
-        const a = T.fromFloat(f64, -0.8697620772582899);
-        const b = T.fromFloat(f64, -0.8602583449105785);
+        const a = Q100_100.withNumerator(7605903601369376408980219232256); // 6.0
+        const b = Q100_100.withNumerator(-3802951800684688204490109616128); // -3.0
         const c = a.div(b);
 
-        try testing.expectApproxEqAbs(1.011047532876533, c.toFloat(f64), 0.0000000000000001);
+        try testing.expectEqual(-2535301200456458802993406410752, c.numerator);
+    }
+
+    {
+        const a = Q100_100.withNumerator(-1267650600228229401496703205376); // -1.0
+        const b = Q100_100.withNumerator(-633825300114114700748351602688); // -0.5
+        const c = a.div(b);
+
+        try testing.expectEqual(2535301200456458802993406410752, c.numerator);
     }
 }
 
