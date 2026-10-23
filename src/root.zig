@@ -24,13 +24,13 @@ pub fn Q(comptime int_bits_: comptime_int, comptime frac_bits_: comptime_int) ty
 
         pub const resolution: f64 = std.math.ldexp(@as(f64, 1.0), -frac_bits);
         pub const bits = int_bits + frac_bits + 1;
-        pub const StorageInt = std.meta.Int(.signed, bits);
+        pub const StorageInt = @Int(.signed, bits);
         pub const max_numerator = std.math.maxInt(StorageInt);
         pub const min_numerator = std.math.minInt(StorageInt);
 
-        pub const IntInt = std.meta.Int(.signed, int_bits + 1);
+        pub const IntInt = @Int(.signed, int_bits + 1);
         const overflow_bits = bits + frac_bits;
-        pub const OverflowInt = std.meta.Int(.signed, overflow_bits);
+        pub const OverflowInt = @Int(.signed, overflow_bits);
 
         numerator: StorageInt,
 
@@ -138,7 +138,7 @@ pub fn Q(comptime int_bits_: comptime_int, comptime frac_bits_: comptime_int) ty
                 // k / 2^f is k * 5^f / 10^f, so we need at most f decimal places
                 // 5^frac_bits = (2^log2(5))^frac_bits < 2^(3* frac_bits)
                 // we need at most frac_bits additional bits for the multiply.
-                const FracInt = std.meta.Int(.unsigned, 4 * frac_bits);
+                const FracInt = @Int(.unsigned, 4 * frac_bits);
                 const frac_part = @as(FracInt, abs_value & ((1 << frac_bits) - 1));
 
                 if (frac_part != 0) {
@@ -175,12 +175,12 @@ pub fn Q(comptime int_bits_: comptime_int, comptime frac_bits_: comptime_int) ty
 
             // we can take at most max_integer_digits, so
             // 10^max_integer_digits = 2^(log2(10) * max_integer_digits) < 2^(4 * max_integer_digits)
-            const IntPartInt = std.meta.Int(.unsigned, 4 * max_integer_digits);
+            const IntPartInt = @Int(.unsigned, 4 * max_integer_digits);
 
             // normalizer needs 10^max_decimal_digits = 2^(log2(10) * max_decimal_digits) < 2^(4 * max_decimal_digits)
             // since the accumulated value is shifted we need scale_shift additional bits
             const scale_shift = frac_bits - max_decimal_digits;
-            const FracPartInt = std.meta.Int(.unsigned, 4 * max_decimal_digits + scale_shift);
+            const FracPartInt = @Int(.unsigned, 4 * max_decimal_digits + scale_shift);
 
             var int_accum: IntPartInt = 0;
 
